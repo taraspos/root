@@ -1,7 +1,16 @@
 import os from 'os';
+import path from 'path';
 
+import * as cache from '@actions/cache';
 import * as core from '@actions/core';
 import * as tc from '@actions/tool-cache';
+import semver from 'semver';
+
+const State = {
+  CacheKey: 'CACHE_KEY',
+  CacheResult: 'CACHE_RESULT',
+  CachePath: 'CACHE_PATH',
+};
 
 function getPlatform(rawPlatform: string): string {
   switch (rawPlatform) {
@@ -46,6 +55,7 @@ interface Inputs {
   version: string;
   enterprise: boolean;
   proxyAddr: string;
+  cacheEnabled: boolean;
 }
 
 function getInputs(): Inputs {
@@ -77,10 +87,13 @@ function getInputs(): Inputs {
     }
   }
 
+  const cacheEnabled = core.getBooleanInput('cache');
+
   return {
     version,
     enterprise,
     proxyAddr,
+    cacheEnabled,
   };
 }
 
@@ -94,6 +107,43 @@ async function fetchVersionFromProxy(proxyAddr: string): Promise<string> {
     );
   }
   return version;
+}
+
+function isGhes(): boolean {
+  const ghUrl = new URL(
+    process.env['GITHUB_SERVER_URL'] || 'https://github.com'
+  );
+  const hostname = ghUrl.hostname.trimEnd().toUpperCase();
+  const isGitHubHost = hostname === 'GITHUB.COM';
+  const isGheCloudHost = hostname.endsWith('.GHE.COM');
+  const isLocalHost = hostname.endsWith('.LOCALHOST');
+  return !isGitHubHost && !isGheCloudHost && !isLocalHost;
+}
+
+function isCacheFeatureAvailable(): boolean {
+  if (cache.isFeatureAvailable()) return true;
+
+  if (isGhes()) {
+    core.warning(
+      'Cache action is only supported on GHES version >= 3.5. If you are on version >=3.5 Please check with GHES admin if Actions cache service is enabled or not.'
+    );
+    return false;
+  }
+
+  core.warning(
+    'The runner was not able to contact the cache service. Caching will be skipped'
+  );
+  return false;
+}
+
+function getToolCachePath(toolName: string, version: string): string {
+  const toolCacheDir = process.env['RUNNER_TOOL_CACHE'] || '';
+  if (!toolCacheDir) {
+    return '';
+  }
+  // Match the path that tc.cacheDir/tc.find produce internally
+  const cleanVersion = semver.clean(version) || version;
+  return path.join(toolCacheDir, toolName, cleanVersion, os.arch());
 }
 
 async function run(): Promise<void> {
@@ -110,17 +160,49 @@ async function run(): Promise<void> {
   const toolName = inputs.enterprise ? 'teleport-ent' : 'teleport';
   core.info(`Installing ${toolName} ${version}`);
 
+  // Check tool cache first (local to the runner)
   const toolPath = tc.find(toolName, version);
   if (toolPath !== '') {
-    core.info('Teleport binaries found in cache.');
+    core.info('Teleport binaries found in tool cache.');
     core.addPath(toolPath);
     return;
   }
 
+  // Try GitHub Cache (shared between runs)
+  if (inputs.cacheEnabled && isCacheFeatureAvailable()) {
+    const cacheKey = `teleport-setup-${toolName}-${version}`;
+    core.saveState(State.CacheKey, cacheKey);
+
+    const toolCachePath = getToolCachePath(toolName, version);
+    if (toolCachePath) {
+      try {
+        core.info('Attempting to restore from GitHub Actions cache...');
+        const matchedKey = await cache.restoreCache([toolCachePath], cacheKey);
+        if (matchedKey) {
+          core.info(`Cache restored from key: ${matchedKey}`);
+          core.saveState(State.CacheResult, matchedKey);
+          core.setOutput('cache-hit', true);
+          const cachedPath = await tc.cacheDir(toolCachePath, toolName, version);
+          core.addPath(cachedPath);
+          return;
+        }
+        core.info('GitHub Actions cache miss.');
+      } catch (error) {
+        core.warning(`Cache restore failed, falling back to download: ${(error as Error).message}`);
+      }
+    }
+    core.setOutput('cache-hit', false);
+  }
+
   core.info('Could not find Teleport binaries in cache. Fetching...');
   core.debug('Downloading tar');
+  const actionRepo = process.env['GITHUB_ACTION_REPOSITORY'] || 'teleport-actions/setup';
+  const actionVersion = process.env['GITHUB_ACTION_REF'] || 'unknown';
   const downloadPath = await tc.downloadTool(
-    `https://cdn.teleport.dev/${toolName}-${version}-bin.tar.gz`
+    `https://cdn.teleport.dev/${toolName}-${version}-bin.tar.gz`,
+    undefined,
+    undefined,
+    { Referer: `${actionRepo}@${actionVersion}` }
   );
 
   core.debug('Extracting tar');
@@ -133,5 +215,9 @@ async function run(): Promise<void> {
   core.info('Fetched binaries from Teleport. Writing them back to cache...');
   const cachedPath = await tc.cacheDir(extractedPath, toolName, version);
   core.addPath(cachedPath);
+
+  if (inputs.cacheEnabled) {
+    core.saveState(State.CachePath, cachedPath);
+  }
 }
 run().catch(core.setFailed);

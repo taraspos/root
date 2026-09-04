@@ -131,4 +131,7 @@ out
 .yarn/install-state.gz
 .pnp.*
 
+# Compiled action bundles
+**/dist/
+
 .vscode/

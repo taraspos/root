@@ -4,9 +4,10 @@
   "license": "Apache-2.0",
   "repository": "https://github.com/teleport-actions/setup.git",
   "scripts": {
-    "build": "ncc build ./src/index.ts -o dist"
+    "build": "ncc build ./src/index.ts -o dist/main && ncc build ./src/post.ts -o dist/post"
   },
   "dependencies": {
+    "@actions/cache": "^6.2.0",
     "@actions/core": "^1.10.0",
     "@actions/tool-cache": "^2.0.1"
   },
