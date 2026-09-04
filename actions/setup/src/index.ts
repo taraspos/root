@@ -200,6 +200,13 @@ async function run(): Promise<void> {
   const runnerTemp = process.env['RUNNER_TEMP'] || os.tmpdir();
   const cacheKey = `teleport-setup-${toolName}-${version}`;
 
+  const downloadHeaders = {
+    Referer: `https://download.setup.teleport-actions.teleport.dev`,
+  };
+  const checksumHeaders = {
+    Referer: `https://checksum.setup.teleport-actions.teleport.dev`,
+  };
+
   // The original compressed archive is cached outside GITHUB_WORKSPACE so it
   // never appears in the checked-out repository.
   const tarPath = path.join(
