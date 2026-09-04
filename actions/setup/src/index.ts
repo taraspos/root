@@ -4,7 +4,6 @@ import path from 'path';
 import * as cache from '@actions/cache';
 import * as core from '@actions/core';
 import * as tc from '@actions/tool-cache';
-import semver from 'semver';
 
 const State = {
   CacheKey: 'CACHE_KEY',
@@ -136,18 +135,9 @@ function isCacheFeatureAvailable(): boolean {
   return false;
 }
 
-function getToolCachePath(toolName: string, version: string): string {
-  const toolCacheDir = process.env['RUNNER_TOOL_CACHE'] || '';
-  if (!toolCacheDir) {
-    return '';
-  }
-  // Match the path that tc.cacheDir/tc.find produce internally
-  const cleanVersion = semver.clean(version) || version;
-  return path.join(toolCacheDir, toolName, cleanVersion, os.arch());
-}
-
 async function run(): Promise<void> {
   const inputs = getInputs();
+  core.setOutput('cache-hit', false);
 
   if (inputs.version === 'auto') {
     core.info(`Fetching version from proxy: ${inputs.proxyAddr}`);
@@ -173,25 +163,25 @@ async function run(): Promise<void> {
     const cacheKey = `teleport-setup-${toolName}-${version}`;
     core.saveState(State.CacheKey, cacheKey);
 
-    const toolCachePath = getToolCachePath(toolName, version);
-    if (toolCachePath) {
-      try {
-        core.info('Attempting to restore from GitHub Actions cache...');
-        const matchedKey = await cache.restoreCache([toolCachePath], cacheKey);
-        if (matchedKey) {
-          core.info(`Cache restored from key: ${matchedKey}`);
-          core.saveState(State.CacheResult, matchedKey);
-          core.setOutput('cache-hit', true);
-          const cachedPath = await tc.cacheDir(toolCachePath, toolName, version);
-          core.addPath(cachedPath);
-          return;
-        }
-        core.info('GitHub Actions cache miss.');
-      } catch (error) {
-        core.warning(`Cache restore failed, falling back to download: ${(error as Error).message}`);
+    // Restore into a temp directory, then use tc.cacheDir to register it in
+    // the tool cache. Restoring directly into the tool cache path would fail
+    // because tc.cacheDir internally deletes the destination before copying.
+    const restoreDir = path.join(os.tmpdir(), `teleport-cache-${Date.now()}`);
+    try {
+      core.info('Attempting to restore from GitHub Actions cache...');
+      const matchedKey = await cache.restoreCache([restoreDir], cacheKey);
+      if (matchedKey) {
+        core.info(`Cache restored from key: ${matchedKey}`);
+        core.saveState(State.CacheResult, matchedKey);
+        core.setOutput('cache-hit', true);
+        const cachedPath = await tc.cacheDir(restoreDir, toolName, version);
+        core.addPath(cachedPath);
+        return;
       }
+      core.info('GitHub Actions cache miss.');
+    } catch (error) {
+      core.warning(`Cache restore failed, falling back to download: ${(error as Error).message}`);
     }
-    core.setOutput('cache-hit', false);
   }
 
   core.info('Could not find Teleport binaries in cache. Fetching...');

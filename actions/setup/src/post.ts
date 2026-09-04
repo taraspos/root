@@ -1,3 +1,5 @@
+import fs from 'fs';
+
 import * as cache from '@actions/cache';
 import * as core from '@actions/core';
 
@@ -33,6 +35,11 @@ async function run(): Promise<void> {
   const cachePath = core.getState(State.CachePath);
   if (!cachePath) {
     core.debug('No cache path found. Skipping cache save.');
+    return;
+  }
+
+  if (!fs.existsSync(cachePath)) {
+    core.warning(`Cache path does not exist on disk: ${cachePath}. Skipping cache save.`);
     return;
   }
 
