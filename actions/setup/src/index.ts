@@ -1,5 +1,6 @@
 import os from 'os';
 import path from 'path';
+import fs from 'fs/promises';
 
 import * as cache from '@actions/cache';
 import * as core from '@actions/core';
@@ -148,6 +149,12 @@ async function run(): Promise<void> {
 
   const version = versionString(os.platform(), os.arch(), inputs.version);
   const toolName = inputs.enterprise ? 'teleport-ent' : 'teleport';
+  const cachePayloadPath = path.join(
+    process.env['GITHUB_WORKSPACE'] || process.cwd(),
+    '.teleport-setup-cache',
+    toolName,
+    version
+  );
   core.info(`Installing ${toolName} ${version}`);
 
   // Check tool cache first (local to the runner)
@@ -163,30 +170,35 @@ async function run(): Promise<void> {
     const cacheKey = `teleport-setup-${toolName}-${version}`;
     core.saveState(State.CacheKey, cacheKey);
 
-    // Restore into a temp directory, then use tc.cacheDir to register it in
-    // the tool cache. Restoring directly into the tool cache path would fail
-    // because tc.cacheDir internally deletes the destination before copying.
-    const restoreDir = path.join(os.tmpdir(), `teleport-cache-${Date.now()}`);
     try {
       core.info('Attempting to restore from GitHub Actions cache...');
-      const matchedKey = await cache.restoreCache([restoreDir], cacheKey);
+      const matchedKey = await cache.restoreCache([cachePayloadPath], cacheKey);
       if (matchedKey) {
         core.info(`Cache restored from key: ${matchedKey}`);
         core.saveState(State.CacheResult, matchedKey);
         core.setOutput('cache-hit', true);
-        const cachedPath = await tc.cacheDir(restoreDir, toolName, version);
+        const cachedPath = await tc.cacheDir(
+          cachePayloadPath,
+          toolName,
+          version
+        );
         core.addPath(cachedPath);
         return;
       }
       core.info('GitHub Actions cache miss.');
     } catch (error) {
-      core.warning(`Cache restore failed, falling back to download: ${(error as Error).message}`);
+      core.warning(
+        `Cache restore failed, falling back to download: ${
+          (error as Error).message
+        }`
+      );
     }
   }
 
   core.info('Could not find Teleport binaries in cache. Fetching...');
   core.debug('Downloading tar');
-  const actionRepo = process.env['GITHUB_ACTION_REPOSITORY'] || 'teleport-actions/setup';
+  const actionRepo =
+    process.env['GITHUB_ACTION_REPOSITORY'] || 'teleport-actions/setup';
   const actionVersion = process.env['GITHUB_ACTION_REF'] || 'unknown';
   const downloadPath = await tc.downloadTool(
     `https://cdn.teleport.dev/${toolName}-${version}-bin.tar.gz`,
@@ -203,11 +215,15 @@ async function run(): Promise<void> {
   ]);
 
   core.info('Fetched binaries from Teleport. Writing them back to cache...');
-  const cachedPath = await tc.cacheDir(extractedPath, toolName, version);
+  await fs.rm(cachePayloadPath, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(cachePayloadPath), { recursive: true });
+  await fs.cp(extractedPath, cachePayloadPath, { recursive: true });
+
+  const cachedPath = await tc.cacheDir(cachePayloadPath, toolName, version);
   core.addPath(cachedPath);
 
   if (inputs.cacheEnabled) {
-    core.saveState(State.CachePath, cachedPath);
+    core.saveState(State.CachePath, cachePayloadPath);
   }
 }
 run().catch(core.setFailed);

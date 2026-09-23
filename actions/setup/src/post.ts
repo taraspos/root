@@ -39,7 +39,9 @@ async function run(): Promise<void> {
   }
 
   if (!fs.existsSync(cachePath)) {
-    core.warning(`Cache path does not exist on disk: ${cachePath}. Skipping cache save.`);
+    core.warning(
+      `Cache path does not exist on disk: ${cachePath}. Skipping cache save.`
+    );
     return;
   }
 

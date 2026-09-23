@@ -46717,6 +46717,9 @@ var external_os_default = /*#__PURE__*/__nccwpck_require__.n(external_os_);
 // EXTERNAL MODULE: external "path"
 var external_path_ = __nccwpck_require__(1017);
 var external_path_default = /*#__PURE__*/__nccwpck_require__.n(external_path_);
+;// CONCATENATED MODULE: external "fs/promises"
+const promises_namespaceObject = require("fs/promises");
+var promises_default = /*#__PURE__*/__nccwpck_require__.n(promises_namespaceObject);
 ;// CONCATENATED MODULE: ../../node_modules/@actions/cache/node_modules/@actions/core/lib/utils.js
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -104470,6 +104473,7 @@ var tool_cache = __nccwpck_require__(834);
 
 
 
+
 const State = {
     CacheKey: 'CACHE_KEY',
     CacheResult: 'CACHE_RESULT',
@@ -104573,6 +104577,7 @@ async function run() {
     }
     const version = versionString(external_os_default().platform(), external_os_default().arch(), inputs.version);
     const toolName = inputs.enterprise ? 'teleport-ent' : 'teleport';
+    const cachePayloadPath = external_path_default().join(process.env['GITHUB_WORKSPACE'] || process.cwd(), '.teleport-setup-cache', toolName, version);
     lib_core.info(`Installing ${toolName} ${version}`);
     // Check tool cache first (local to the runner)
     const toolPath = tool_cache.find(toolName, version);
@@ -104585,18 +104590,14 @@ async function run() {
     if (inputs.cacheEnabled && isCacheFeatureAvailable()) {
         const cacheKey = `teleport-setup-${toolName}-${version}`;
         lib_core.saveState(State.CacheKey, cacheKey);
-        // Restore into a temp directory, then use tc.cacheDir to register it in
-        // the tool cache. Restoring directly into the tool cache path would fail
-        // because tc.cacheDir internally deletes the destination before copying.
-        const restoreDir = external_path_default().join(external_os_default().tmpdir(), `teleport-cache-${Date.now()}`);
         try {
             lib_core.info('Attempting to restore from GitHub Actions cache...');
-            const matchedKey = await restoreCache([restoreDir], cacheKey);
+            const matchedKey = await restoreCache([cachePayloadPath], cacheKey);
             if (matchedKey) {
                 lib_core.info(`Cache restored from key: ${matchedKey}`);
                 lib_core.saveState(State.CacheResult, matchedKey);
                 lib_core.setOutput('cache-hit', true);
-                const cachedPath = await tool_cache.cacheDir(restoreDir, toolName, version);
+                const cachedPath = await tool_cache.cacheDir(cachePayloadPath, toolName, version);
                 lib_core.addPath(cachedPath);
                 return;
             }
@@ -104618,10 +104619,13 @@ async function run() {
         '1',
     ]);
     lib_core.info('Fetched binaries from Teleport. Writing them back to cache...');
-    const cachedPath = await tool_cache.cacheDir(extractedPath, toolName, version);
+    await promises_default().rm(cachePayloadPath, { recursive: true, force: true });
+    await promises_default().mkdir(external_path_default().dirname(cachePayloadPath), { recursive: true });
+    await promises_default().cp(extractedPath, cachePayloadPath, { recursive: true });
+    const cachedPath = await tool_cache.cacheDir(cachePayloadPath, toolName, version);
     lib_core.addPath(cachedPath);
     if (inputs.cacheEnabled) {
-        lib_core.saveState(State.CachePath, cachedPath);
+        lib_core.saveState(State.CachePath, cachePayloadPath);
     }
 }
 run().catch(lib_core.setFailed);
