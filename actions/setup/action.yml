@@ -18,9 +18,9 @@ inputs:
 outputs:
   cache-hit:
     description: 'A boolean value indicating whether the Teleport binaries were restored from the GitHub Actions cache.'
-extend:
-  - from: '@/common/action.yml'
-    include:
-      - field: runs
-      - field: author
-      - field: branding
+runs:
+  using: node24
+  main: dist/index.js
+branding:
+  color: purple
+  icon: terminal
