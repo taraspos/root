@@ -110,17 +110,9 @@ async function fetchVersionFromProxy(proxyAddr: string): Promise<string> {
 
 async function verifyChecksum(
   archivePath: string,
-  checksumUrl: string,
+  checksumUrl: string
 ): Promise<boolean> {
-  const headers = {
-    Referer: checksumReferer,
-  };
-  const checksumPath = await tc.downloadTool(
-    checksumUrl,
-    undefined,
-    undefined,
-    headers,
-  );
+  const checksumPath = await tc.downloadTool(checksumUrl);
   try {
     const expectedChecksum = (await fs.readFile(checksumPath, 'utf8'))
       .trim()
@@ -210,9 +202,6 @@ async function run(): Promise<void> {
   const checksumUrl = `${archiveUrl}.sha256`;
   const runnerTemp = process.env['RUNNER_TEMP'] || os.tmpdir();
   const cacheKey = `teleport-setup-${toolName}-${version}`;
-  const headers = {
-    Referer: downloadReferer,
-  };
 
   // The original compressed archive is cached outside GITHUB_WORKSPACE so it
   // never appears in the checked-out repository.
@@ -265,7 +254,7 @@ async function run(): Promise<void> {
 
   core.info('Could not find Teleport binaries in cache. Fetching...');
   core.debug('Downloading tar');
-  const downloadPath = await tc.downloadTool(archiveUrl, undefined, undefined, headers);
+  const downloadPath = await tc.downloadTool(archiveUrl);
 
   if (!(await verifyChecksum(downloadPath, checksumUrl))) {
     await fs.rm(downloadPath, { force: true });
